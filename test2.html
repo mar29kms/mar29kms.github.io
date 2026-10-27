@@ -44,6 +44,7 @@
         <button class="btn btn-outline-secondary" id="btnCsv"><i class="bi bi-download"></i> CSV 다운로드</button>
         <button class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
         <ul class="dropdown-menu dropdown-menu-end">
+          <li><a class="dropdown-item" href="#" id="btnSample">샘플 8건 불러오기</a></li>
           <li><a class="dropdown-item" href="#" id="btnTemplate">업로드 양식(샘플) 받기</a></li>
           <li><a class="dropdown-item" href="#" id="btnMasterCsv">상품 마스터 전체 받기</a></li>
         </ul>
@@ -80,6 +81,13 @@
       </div>
       <div class="modal-body">
         <div id="reader"></div>
+        <div class="d-flex align-items-center gap-2 mt-2">
+          <button class="btn btn-sm btn-outline-primary text-nowrap" id="btnFocus"><i class="bi bi-bullseye"></i> 초점 다시 맞추기</button>
+          <div id="zoomBox" class="d-none flex-grow-1 d-flex align-items-center gap-2">
+            <i class="bi bi-zoom-in"></i><input type="range" class="form-range" id="zoom">
+          </div>
+        </div>
+        <div class="form-text">초점이 흐리면 폰을 바코드에서 15~20cm 떨어뜨리고, 줌을 올려 보세요. 화면을 탭해도 다시 초점을 맞춥니다.</div>
         <div class="form-check form-switch mt-3">
           <input class="form-check-input" type="checkbox" id="optPlus1" checked>
           <label class="form-check-label" for="optPlus1">스캔할 때마다 실재고 +1</label>
@@ -123,6 +131,10 @@ try { const s = JSON.parse(localStorage.getItem('stocktake_master_v1') || 'null'
 const KEY = 'stocktake_rows_v1';
 let rows = [];
 try { rows = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch(e) { rows = []; }
+const sampleRows = () => SAMPLE.slice(0, 8).map(m => ({...m, actual: ''}));
+try {                                  // 처음 열었을 때 한 번만 간단한 샘플 8건을 목록에 채움
+  if (!rows.length && !localStorage.getItem('stocktake_seeded_v2')) { rows = sampleRows(); localStorage.setItem('stocktake_seeded_v2', '1'); }
+} catch(e) {}
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -215,18 +227,61 @@ $('scanModal').addEventListener('shown.bs.modal', async () => {
     Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
     Html5QrcodeSupportedFormats.UPC_A,  Html5QrcodeSupportedFormats.UPC_E,
     Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.QR_CODE ] });
+    Html5QrcodeSupportedFormats.QR_CODE ],
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true } });   // 지원 기기는 네이티브 인식(빠르고 정확)
   try {
     await scanner.start({ facingMode: 'environment' },
-      { fps: 10, qrbox: (w,h) => ({ width: Math.min(w*0.9, 320), height: Math.min(h*0.5, 160) }) },
+      { fps: 15,
+        qrbox: (w,h) => ({ width: Math.floor(w*0.9), height: Math.floor(Math.min(h*0.6, 220)) }),
+        videoConstraints: {
+          facingMode: 'environment',
+          width:  { ideal: 1920 }, height: { ideal: 1080 },   // 해상도를 높여야 가는 바코드도 읽힘
+          advanced: [{ focusMode: 'continuous' }]             // 연속 자동초점 (지원 기기)
+        } },
       onScan, () => {});
+    tuneCamera();
   } catch (err) {
     $('scanMsg').innerHTML = '<span class="text-danger">카메라를 시작할 수 없습니다. HTTPS 접속인지, 카메라 권한이 허용되어 있는지 확인하세요.</span>';
   }
 });
 $('scanModal').addEventListener('hidden.bs.modal', async () => {
   if (scanner) { try { await scanner.stop(); scanner.clear(); } catch(e) {} scanner = null; }
+  camTrack = null; $('zoomBox').classList.add('d-none');
 });
+
+/* ----- 카메라 초점/줌 ----- */
+let camTrack = null;
+async function tuneCamera(){
+  const v = document.querySelector('#reader video');
+  camTrack = v && v.srcObject && v.srcObject.getVideoTracks()[0];
+  if (!camTrack || !camTrack.getCapabilities) return;
+  const cap = camTrack.getCapabilities();
+  try {
+    if (cap.focusMode && cap.focusMode.includes('continuous'))
+      await camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+  } catch(e) {}
+  if (cap.zoom) {                                   // 줌 지원 기기만 슬라이더 표시
+    const z = $('zoom'); z.min = cap.zoom.min; z.max = cap.zoom.max; z.step = cap.zoom.step || 0.1;
+    z.value = (camTrack.getSettings().zoom) || cap.zoom.min;
+    $('zoomBox').classList.remove('d-none');
+  }
+}
+async function refocus(){
+  if (!camTrack) return;
+  const cap = camTrack.getCapabilities ? camTrack.getCapabilities() : {};
+  try {
+    if (cap.focusMode && cap.focusMode.includes('single-shot')) {
+      await camTrack.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+      setTimeout(() => camTrack && camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {}), 700);
+    } else if (cap.focusMode && cap.focusMode.includes('continuous')) {
+      await camTrack.applyConstraints({ advanced: [{ focusMode: 'manual' }] }).catch(() => {});
+      await camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+    } else toast('이 기기는 초점 조절을 지원하지 않습니다. 바코드와 거리를 조절해 보세요.');
+  } catch(e) {}
+}
+$('btnFocus').onclick = refocus;
+$('reader').addEventListener('click', refocus);
+$('zoom').addEventListener('input', e => { if (camTrack) camTrack.applyConstraints({ advanced: [{ zoom: +e.target.value }] }).catch(() => {}); });
 
 function onScan(code){
   const now = Date.now();
@@ -256,6 +311,7 @@ function downloadCsv(name, lines){
 const today = () => new Date().toISOString().slice(0,10);
 
 /* 다운로드: 현재 조사 목록 (차이 포함) */
+$('btnSample').onclick = e => { e.preventDefault(); rows = sampleRows(); render(); toast('샘플 8건을 불러왔습니다.'); };
 $('btnCsv').onclick = () => {
   if (!rows.length) return toast('다운로드할 조사 목록이 없습니다.');
   downloadCsv(`재고조사_${today()}.csv`, [csvLine([...HEAD,'차이']),
