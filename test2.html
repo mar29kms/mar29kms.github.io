@@ -88,11 +88,40 @@
           </div>
         </div>
         <div class="form-text">초점이 흐리면 폰을 바코드에서 15~20cm 떨어뜨리고, 줌을 올려 보세요. 화면을 탭해도 다시 초점을 맞춥니다.</div>
-        <div class="form-check form-switch mt-3">
-          <input class="form-check-input" type="checkbox" id="optPlus1" checked>
-          <label class="form-check-label" for="optPlus1">스캔할 때마다 실재고 +1</label>
+        <div class="d-flex flex-wrap gap-3 mt-3">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="optSound" checked>
+            <label class="form-check-label" for="optSound"><i class="bi bi-volume-up"></i> 소리</label>
+          </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="optPlus1">
+            <label class="form-check-label" for="optPlus1">수량 입력 없이 스캔마다 +1</label>
+          </div>
         </div>
         <div id="scanMsg" class="mt-2 small text-muted">카메라를 바코드에 비춰주세요.</div>
+
+        <div id="foundPanel" class="card border-success mt-3 d-none">
+          <div class="card-body">
+            <div class="d-flex justify-content-between gap-2">
+              <div>
+                <div class="fw-bold fs-5" id="fpName"></div>
+                <div class="text-muted small" id="fpSub"></div>
+                <div class="text-muted small" id="fpIds"></div>
+              </div>
+              <div class="text-end text-nowrap"><div class="small text-muted">전산재고</div><div class="fs-4 fw-bold" id="fpStock"></div></div>
+            </div>
+            <label class="form-label mt-2 mb-1" for="fpQty">실재고 수량</label>
+            <div class="input-group input-group-lg">
+              <button class="btn btn-outline-secondary" id="fpMinus" type="button">&minus;</button>
+              <input type="text" inputmode="decimal" class="form-control text-center fw-bold" id="fpQty" autocomplete="off">
+              <button class="btn btn-outline-secondary" id="fpPlus" type="button">+</button>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+              <button class="btn btn-success flex-grow-1" id="fpOk" type="button"><i class="bi bi-check-lg"></i> 확인 후 계속 스캔</button>
+              <button class="btn btn-outline-secondary" id="fpCancel" type="button">취소</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -218,10 +247,10 @@ $('q').addEventListener('keydown', e => {
 });
 
 /* ===== 카메라 바코드 스캔 ===== */
-let scanner = null, lastCode = '', lastTime = 0;
+let scanner = null, lastCode = '', lastTime = 0, scanLocked = false, pending = null;
 const modal = new bootstrap.Modal($('scanModal'));
 
-$('btnScan').onclick = () => modal.show();
+$('btnScan').onclick = () => { initAudio(); modal.show(); };
 $('scanModal').addEventListener('shown.bs.modal', async () => {
   scanner = new Html5Qrcode('reader', { formatsToSupport: [
     Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
@@ -246,7 +275,7 @@ $('scanModal').addEventListener('shown.bs.modal', async () => {
 });
 $('scanModal').addEventListener('hidden.bs.modal', async () => {
   if (scanner) { try { await scanner.stop(); scanner.clear(); } catch(e) {} scanner = null; }
-  camTrack = null; $('zoomBox').classList.add('d-none');
+  camTrack = null; $('zoomBox').classList.add('d-none'); scanLocked = false; pending = null; lastCode = ''; $('foundPanel').classList.add('d-none');
 });
 
 /* ----- 카메라 초점/줌 ----- */
@@ -283,16 +312,79 @@ $('btnFocus').onclick = refocus;
 $('reader').addEventListener('click', refocus);
 $('zoom').addEventListener('input', e => { if (camTrack) camTrack.applyConstraints({ advanced: [{ zoom: +e.target.value }] }).catch(() => {}); });
 
+/* ----- 효과음 (WebAudio, 파일 불필요) ----- */
+let actx = null;
+function initAudio(){
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch(e) {}
+}
+function tone(freq, start, dur, type = 'sine', vol = 0.25){
+  if (!actx || !$('optSound').checked) return;
+  const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + start;
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(actx.destination);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+const soundOk   = () => { tone(1000, 0, 0.09); tone(1500, 0.10, 0.14); };                       // 찾음: 높은 "삐-빅"
+const soundFail = () => { tone(220, 0, 0.22, 'sawtooth', 0.3); tone(150, 0.26, 0.34, 'sawtooth', 0.3); }; // 못 찾음: 낮은 "부-웅"
+const vib = p => { if (navigator.vibrate) navigator.vibrate(p); };
+
+/* ----- 스캔 결과 처리 ----- */
 function onScan(code){
+  if (scanLocked) return;                                       // 수량 입력 중에는 새 스캔 무시
   const now = Date.now();
-  if (code === lastCode && now - lastTime < 1500) return;   // 같은 바코드 연속 인식 방지
+  if (code === lastCode && now - lastTime < 1500) return;       // 같은 바코드 연속 인식 방지
   lastCode = code; lastTime = now;
   const m = MASTER.find(m => m.barcode === code);
-  if (!m) { $('scanMsg').innerHTML = `<span class="text-danger">미등록 바코드: ${esc(code)}</span>`; return; }
-  const i = addItem(m, $('optPlus1').checked);
-  $('scanMsg').innerHTML = `<span class="text-success">${esc(m.name)} — 실재고 ${rows[i].actual||0}</span>`;
-  if (navigator.vibrate) navigator.vibrate(80);
+  if (!m) {
+    soundFail(); vib([200, 100, 200]);
+    $('scanMsg').innerHTML = `<span class="text-danger fw-bold"><i class="bi bi-x-circle"></i> 미등록 바코드: ${esc(code)}</span>`;
+    return;
+  }
+  soundOk(); vib(60);
+  if ($('optPlus1').checked) {                                  // 입력 없이 +1 모드
+    const i = addItem(m, true);
+    $('scanMsg').innerHTML = `<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> ${esc(m.name)} — 실재고 ${rows[i].actual}</span>`;
+    return;
+  }
+  showFound(m);
 }
+
+function showFound(m){
+  scanLocked = true; pending = m;
+  const cur = rows.find(r => r.code === m.code);
+  $('scanMsg').innerHTML = '';
+  $('fpName').textContent = m.name;
+  $('fpSub').textContent = [m.spec, m.unit].filter(Boolean).join(' · ');
+  $('fpIds').textContent = `코드 ${m.code} · ${m.barcode}`;
+  $('fpStock').textContent = (cur ? cur.stock : m.stock) + (m.unit || '');
+  $('fpQty').value = cur && cur.actual !== '' && cur.actual != null ? cur.actual : '';
+  $('fpQty').classList.remove('is-invalid');
+  $('foundPanel').classList.remove('d-none');
+  $('foundPanel').scrollIntoView({ block: 'nearest' });
+  setTimeout(() => { $('fpQty').focus(); $('fpQty').select(); }, 60);
+}
+function closeFound(){
+  $('foundPanel').classList.add('d-none');
+  pending = null; scanLocked = false; lastCode = '';
+  $('scanMsg').textContent = '다음 바코드를 비춰주세요.';
+}
+function confirmQty(){
+  if (!pending) return;
+  const v = $('fpQty').value.trim();
+  if (v === '' || isNaN(Number(v))) { $('fpQty').classList.add('is-invalid'); $('fpQty').focus(); return; }
+  const i = addItem(pending, false);
+  rows[i].actual = v; render(i);
+  toast(`${pending.name} 실재고 ${v}`);
+  closeFound();
+}
+const stepQty = d => { const n = Number($('fpQty').value) || 0; $('fpQty').value = Math.max(0, n + d); };
+$('fpOk').onclick = confirmQty;
+$('fpCancel').onclick = closeFound;
+$('fpPlus').onclick = () => stepQty(1);
+$('fpMinus').onclick = () => stepQty(-1);
+$('fpQty').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); confirmQty(); } });
 
 /* ===== 저장 / CSV / 비우기 ===== */
 $('btnSave').onclick = async () => {
