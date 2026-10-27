@@ -39,7 +39,16 @@
     </div>
     <div class="col-12 col-md-5 d-flex gap-2 justify-content-md-end">
       <button class="btn btn-success" id="btnSave"><i class="bi bi-cloud-upload"></i> 저장</button>
-      <button class="btn btn-outline-secondary" id="btnCsv"><i class="bi bi-filetype-csv"></i> CSV</button>
+      <div class="btn-group">
+        <button class="btn btn-outline-secondary" id="btnUpload"><i class="bi bi-upload"></i> CSV 업로드</button>
+        <button class="btn btn-outline-secondary" id="btnCsv"><i class="bi bi-download"></i> CSV 다운로드</button>
+        <button class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><a class="dropdown-item" href="#" id="btnTemplate">업로드 양식(샘플) 받기</a></li>
+          <li><a class="dropdown-item" href="#" id="btnMasterCsv">상품 마스터 전체 받기</a></li>
+        </ul>
+      </div>
+      <input type="file" id="fileCsv" accept=".csv,text/csv" class="d-none">
       <button class="btn btn-outline-danger" id="btnClear"><i class="bi bi-trash"></i> 비우기</button>
     </div>
   </div>
@@ -91,14 +100,24 @@
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 /* ===== 상품 마스터 (샘플) — 실제로는 서버(UniDAC/Firebird → API)에서 가져오세요 ===== */
-let MASTER = [
-  {code:'1001', barcode:'8801234567890', name:'생수 500ml',      spec:'20입',  unit:'박스', stock:12},
-  {code:'1002', barcode:'8801234567891', name:'생수 2L',         spec:'6입',   unit:'박스', stock:8},
-  {code:'1003', barcode:'8809876543210', name:'라면 신라면',     spec:'120g',  unit:'봉',   stock:240},
-  {code:'1004', barcode:'8809876543211', name:'라면 짜파게티',   spec:'140g',  unit:'봉',   stock:180},
-  {code:'1005', barcode:'8801111222233', name:'우유 흰우유',     spec:'1L',    unit:'개',   stock:36},
-  {code:'1006', barcode:'8802222333344', name:'커피믹스',        spec:'100T',  unit:'박스', stock:15},
-];
+const ean13 = d12 => d12 + ((10 - [...d12].reduce((s,c,i) => s + (+c) * (i%2 ? 3 : 1), 0) % 10) % 10);
+const SAMPLE = [
+  ['생수 500ml','20입','박스',12], ['생수 2L','6입','박스',8], ['탄산수 플레인','350ml','개',48],
+  ['라면 신라면','120g','봉',240], ['라면 짜파게티','140g','봉',180], ['컵라면 육개장','86g','개',96],
+  ['즉석밥','210g','개',150], ['참치캔 살코기','150g','개',120], ['스팸 클래식','200g','개',64],
+  ['우유 흰우유','1L','개',36], ['우유 저지방','900ml','개',24], ['요구르트 플레인','80ml×5','팩',40],
+  ['계란 특란','30구','판',18], ['식빵','400g','봉',22], ['버터','200g','개',14],
+  ['커피믹스','100T','박스',15], ['아메리카노 원두','1kg','봉',9], ['녹차 티백','50T','박스',11],
+  ['오렌지주스','1.5L','개',28], ['콜라','1.5L','개',60], ['사이다','1.5L','개',54],
+  ['소주','360ml','병',200], ['맥주 캔','500ml','캔',144], ['막걸리','750ml','병',30],
+  ['식용유','900ml','개',32], ['간장','500ml','병',26], ['고추장','500g','개',19],
+  ['설탕','1kg','봉',45], ['소금','1kg','봉',38], ['밀가루 중력분','1kg','봉',27],
+  ['휴지 3겹','30롤','팩',20], ['물티슈','100매','팩',55], ['주방세제','1L','개',33],
+].map((r,i) => ({ code: String(1001+i), barcode: ean13('880' + String(1234500000 + i*7).padStart(9,'0')),
+                  name:r[0], spec:r[1], unit:r[2], stock:r[3] }));
+
+let MASTER = SAMPLE;
+try { const s = JSON.parse(localStorage.getItem('stocktake_master_v1') || 'null'); if (Array.isArray(s) && s.length) MASTER = s; } catch(e) {}
 
 /* ===== 상태 ===== */
 const KEY = 'stocktake_rows_v1';
@@ -226,13 +245,75 @@ $('btnSave').onclick = async () => {
   // const res = await fetch('/api/stocktake', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rows)});
   persist(); toast('이 기기에 저장했습니다. (서버 연동은 saveToServer 부분에 구현)');
 };
+/* ----- CSV 공통 ----- */
+const HEAD = ['코드','바코드','상품명','규격','단위','전산재고','실재고'];
+const csvLine = a => a.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',');
+function downloadCsv(name, lines){
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], {type:'text/csv;charset=utf-8'});   // BOM: 엑셀 한글 깨짐 방지
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const today = () => new Date().toISOString().slice(0,10);
+
+/* 다운로드: 현재 조사 목록 (차이 포함) */
 $('btnCsv').onclick = () => {
-  const head = ['코드','바코드','상품명','규격','단위','전산재고','실재고','차이'];
-  const lines = rows.map(r => [r.code,r.barcode,r.name,r.spec,r.unit,r.stock,r.actual,(Number(r.actual)||0)-(Number(r.stock)||0)]
-    .map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','));
-  const blob = new Blob(['\ufeff' + [head.join(','), ...lines].join('\r\n')], {type:'text/csv;charset=utf-8'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `재고조사_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  if (!rows.length) return toast('다운로드할 조사 목록이 없습니다.');
+  downloadCsv(`재고조사_${today()}.csv`, [csvLine([...HEAD,'차이']),
+    ...rows.map(r => csvLine([r.code,r.barcode,r.name,r.spec,r.unit,r.stock,r.actual,(Number(r.actual)||0)-(Number(r.stock)||0)]))]);
+};
+$('btnMasterCsv').onclick = e => { e.preventDefault();
+  downloadCsv(`상품마스터_${today()}.csv`, [csvLine(HEAD.slice(0,6)), ...MASTER.map(m => csvLine([m.code,m.barcode,m.name,m.spec,m.unit,m.stock]))]); };
+$('btnTemplate').onclick = e => { e.preventDefault();
+  downloadCsv('업로드양식.csv', [csvLine(HEAD), ...SAMPLE.slice(0,5).map(m => csvLine([m.code,m.barcode,m.name,m.spec,m.unit,m.stock,'']))]); };
+
+/* 업로드: 상품 마스터에 병합(코드 기준). '실재고' 값이 있는 행은 조사 목록에도 반영 */
+function parseCsv(text){
+  const out = []; let row = [], cur = '', q = false;
+  text = text.replace(/^\ufeff/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i+1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i+1] === '\n') i++; row.push(cur); out.push(row); row = []; cur = ''; }
+    else cur += c;
+  }
+  if (cur !== '' || row.length) { row.push(cur); out.push(row); }
+  return out.filter(r => r.some(v => v.trim() !== ''));
+}
+const ALIAS = { code:['코드','상품코드','code'], barcode:['바코드','barcode'], name:['상품명','품명','name'],
+                spec:['규격','spec'], unit:['단위','unit'], stock:['전산재고','재고','stock'], actual:['실재고','실사','actual'] };
+
+$('btnUpload').onclick = () => $('fileCsv').click();
+$('fileCsv').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const buf = await f.arrayBuffer();
+  let text = new TextDecoder('utf-8').decode(buf);
+  if (text.includes('\ufffd')) text = new TextDecoder('euc-kr').decode(buf);   // 엑셀 기본 CSV(CP949) 대응
+  const data = parseCsv(text);
+  if (data.length < 2) return toast('데이터가 없습니다.');
+  const h = data[0].map(s => s.trim().toLowerCase());
+  const col = {}; for (const k in ALIAS) col[k] = h.findIndex(x => ALIAS[k].includes(x));
+  if (col.code < 0 && col.barcode < 0) return toast('헤더에 "코드" 또는 "바코드" 열이 필요합니다.');
+  let added = 0, upd = 0, counted = 0;
+  for (const r of data.slice(1)) {
+    const g = k => col[k] >= 0 ? (r[col[k]] ?? '').trim() : '';
+    const item = { code: g('code'), barcode: g('barcode'), name: g('name'), spec: g('spec'), unit: g('unit'), stock: g('stock') };
+    if (!item.code) item.code = item.barcode;
+    if (!item.code) continue;
+    const mi = MASTER.findIndex(m => m.code === item.code);
+    if (mi < 0) { MASTER.push(item); added++; } else { MASTER[mi] = {...MASTER[mi], ...Object.fromEntries(Object.entries(item).filter(([,v]) => v !== ''))}; upd++; }
+    const actual = g('actual');
+    if (actual !== '') {
+      const ri = rows.findIndex(x => x.code === item.code);
+      const merged = {...(mi < 0 ? item : MASTER[mi]), actual};
+      if (ri < 0) rows.push(merged); else rows[ri] = merged;
+      counted++;
+    }
+  }
+  try { localStorage.setItem('stocktake_master_v1', JSON.stringify(MASTER)); } catch(err) {}
+  render();
+  toast(`업로드 완료 — 신규 ${added}, 갱신 ${upd}${counted ? `, 실재고 반영 ${counted}` : ''}`);
 };
 $('btnClear').onclick = () => { if (confirm('조사 목록을 모두 비울까요?')) { rows = []; render(); } };
 
