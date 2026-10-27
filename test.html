@@ -1,624 +1,680 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>바코드 연동 재고조사 및 관리 시스템</title>
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-    <!-- HTML5 QR / Barcode Scanner Library -->
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <style>
-        body {
-            background-color: #f4f6f9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        }
-        .table-container {
-            background-color: #ffffff;
-            border-radius: 0.5rem;
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-        }
-        .actual-input {
-            width: 110px;
-            text-align: center;
-            font-weight: bold;
-            color: #0d6efd;
-        }
-        .actual-input:focus {
-            background-color: #e8f0fe;
-            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
-        }
-        #reader {
-            width: 100%;
-            min-height: 250px;
-            border-radius: 0.5rem;
-            overflow: hidden;
-            background: #000;
-        }
-        #reader video {
-            object-fit: cover !important;
-            border-radius: 0.5rem;
-        }
-        .scanned-highlight {
-            animation: highlightFade 2s ease-out;
-        }
-        @keyframes highlightFade {
-            0% { background-color: #d1e7dd; }
-            100% { background-color: transparent; }
-        }
-        .scan-status-badge {
-            font-size: 0.9rem;
-            min-height: 52px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>재고조사 및 관리 시스템</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <!-- html5-qrcode Library for Barcode/QR Scanning -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .table-container {
+      background: #ffffff;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      padding: 20px;
+    }
+    .input-qty {
+      width: 105px;
+      text-align: right;
+      font-weight: 700;
+      color: #0d6efd;
+    }
+    .input-qty:focus {
+      background-color: #e8f0fe;
+    }
+    .row-highlight {
+      animation: highlightFade 2s ease-out;
+    }
+    @keyframes highlightFade {
+      0% { background-color: #d1e7dd; }
+      100% { background-color: transparent; }
+    }
+    #interactive-viewport video {
+      width: 100% !important;
+      height: auto !important;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+    .scanner-overlay {
+      position: relative;
+      background-color: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      min-height: 280px;
+    }
+    .scanner-controls {
+      background: rgba(0,0,0,0.7);
+      padding: 8px 12px;
+      border-radius: 6px;
+    }
+  </style>
 </head>
 <body>
 
-    <!-- Header Navigation -->
-    <nav class="navbar navbar-dark bg-dark sticky-top shadow-sm">
-        <div class="container-fluid px-md-4">
-            <a class="navbar-brand fw-bold" href="#">
-                <i class="fa-solid fa-barcode me-2 text-primary"></i>재고조사 및 관리 시스템
-            </a>
-            <div class="d-flex gap-2">
-                <label class="btn btn-outline-light btn-sm mb-0">
-                    <i class="fa-solid fa-file-import me-1"></i>CSV 가져오기
-                    <input type="file" id="importFileInput" accept=".csv" onchange="handleFileImport(event)" hidden>
-                </label>
-                <button class="btn btn-success btn-sm" onclick="exportCSV()">
-                    <i class="fa-solid fa-file-csv me-1"></i>CSV 내보내기
-                </button>
+  <!-- Top Navbar -->
+  <nav class="navbar navbar-dark bg-dark sticky-top shadow-sm">
+    <div class="container-fluid px-md-4">
+      <a class="navbar-brand fw-bold" href="#">
+        <i class="bi bi-boxes text-primary me-2"></i>재고조사 및 관리 시스템
+      </a>
+      <div class="d-flex gap-2">
+        <label class="btn btn-outline-light btn-sm mb-0">
+          <i class="bi bi-file-earmark-arrow-up me-1"></i>CSV 가져오기
+          <input type="file" id="csvFileInput" accept=".csv" onchange="importCSV(event)" hidden>
+        </label>
+        <button class="btn btn-success btn-sm" onclick="exportCSV()">
+          <i class="bi bi-file-earmark-excel me-1"></i>CSV 내보내기
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid py-4 px-md-4">
+    <!-- Action Toolbar -->
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body p-3">
+        <div class="row g-2 align-items-center">
+          <!-- Camera Scan Trigger -->
+          <div class="col-12 col-md-3">
+            <button class="btn btn-danger w-100 fw-bold py-2 shadow-sm" onclick="openScannerModal()">
+              <i class="bi bi-camera me-2"></i>카메라 바코드 스캔
+            </button>
+          </div>
+
+          <!-- Search Bar -->
+          <div class="col-12 col-md-4">
+            <div class="input-group">
+              <span class="input-group-text bg-light border-end-0"><i class="bi bi-search text-muted"></i></span>
+              <input type="text" id="searchInput" class="form-control border-start-0" placeholder="코드, 상품명, 규격 검색..." oninput="renderTable()">
             </div>
+          </div>
+
+          <!-- Additional Actions -->
+          <div class="col-12 col-md-5 d-flex justify-content-md-end gap-2 flex-wrap">
+            <button class="btn btn-outline-secondary" onclick="copySystemToActual()" title="전산재고 수량을 실재고로 일괄 복사">
+              <i class="bi bi-copy me-1"></i>전산→실재고 복사
+            </button>
+            <button class="btn btn-outline-primary" onclick="openAddModal()">
+              <i class="bi bi-plus-lg me-1"></i>행 추가
+            </button>
+            <button class="btn btn-primary fw-bold" onclick="saveAllItems()">
+              <i class="bi bi-floppy me-1"></i>저장하기
+            </button>
+          </div>
         </div>
-    </nav>
-
-    <div class="container-fluid py-4 px-md-4">
-
-        <!-- Control Action Bar -->
-        <div class="card border-0 shadow-sm mb-3">
-            <div class="card-body p-3">
-                <div class="row g-2 align-items-center">
-                    <!-- Scanner Button -->
-                    <div class="col-12 col-md-3">
-                        <button class="btn btn-danger w-100 fw-bold py-2 shadow-sm" onclick="openScannerModal()">
-                            <i class="fa-solid fa-camera me-2"></i>카메라 바코드 스캔
-                        </button>
-                    </div>
-
-                    <!-- Search Box -->
-                    <div class="col-12 col-md-4">
-                        <div class="input-group">
-                            <span class="input-group-text bg-light border-end-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
-                            <input type="text" id="searchInput" class="form-control border-start-0" placeholder="코드 또는 상품명 검색..." onkeyup="renderTable()">
-                        </div>
-                    </div>
-
-                    <!-- Actions -->
-                    <div class="col-12 col-md-5 d-flex justify-content-md-end gap-2 flex-wrap">
-                        <button class="btn btn-outline-secondary" onclick="copySystemToActual()" title="모든 전산재고 수량을 실재고로 동기화">
-                            <i class="fa-solid fa-copy me-1"></i>전산→실재고 복사
-                        </button>
-                        <button class="btn btn-outline-primary" onclick="openAddModal()">
-                            <i class="fa-solid fa-plus me-1"></i>행 추가
-                        </button>
-                        <button class="btn btn-primary fw-bold" onclick="saveAllData()">
-                            <i class="fa-solid fa-floppy-disk me-1"></i>저장하기
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Inventory Table -->
-        <div class="table-container p-3">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width: 18%;">코드</th>
-                            <th style="width: 28%;">상품명</th>
-                            <th style="width: 18%;" class="text-center">규격</th>
-                            <th style="width: 10%;" class="text-center">단위</th>
-                            <th style="width: 12%;" class="text-center">전산재고</th>
-                            <th style="width: 14%;" class="text-center">실재고</th>
-                        </tr>
-                    </thead>
-                    <tbody id="inventoryTableBody">
-                        <!-- Dynamic Content -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
+      </div>
     </div>
 
-    <!-- Barcode Scanner Modal -->
-    <div class="modal fade" id="scannerModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header bg-dark text-white">
-                    <h5 class="modal-title fw-bold">
-                        <i class="fa-solid fa-qrcode me-2 text-danger"></i>바코드 / QR 코드 스캐너
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body p-3 text-center">
-                    <!-- Scanner Container -->
-                    <div id="reader"></div>
-
-                    <!-- Settings -->
-                    <div class="form-check form-switch mt-3 d-flex justify-content-center gap-2 align-items-center">
-                        <input class="form-check-input" type="checkbox" id="autoIncrementSwitch" checked style="cursor: pointer;">
-                        <label class="form-check-label fw-bold text-dark" for="autoIncrementSwitch" style="cursor: pointer;">
-                            스캔 즉시 실재고 +1 자동 증가
-                        </label>
-                    </div>
-
-                    <!-- Feedback Banner -->
-                    <div id="scanResultBadge" class="alert alert-secondary mt-3 mb-0 scan-status-badge fw-bold text-break">
-                        카메라를 초기화 중입니다...
-                    </div>
-                </div>
-                <div class="modal-footer bg-light">
-                    <button type="button" class="btn btn-secondary w-100" data-bs-dismiss="modal">스캐너 닫기</button>
-                </div>
-            </div>
-        </div>
+    <!-- Inventory Data Table -->
+    <div class="table-container">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="badge bg-secondary p-2 fs-6">총 품목 수: <span id="totalItemCount">0</span>개</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col" style="width: 18%;">코드</th>
+              <th scope="col" style="width: 28%;">상품명</th>
+              <th scope="col" style="width: 18%;" class="text-center">규격</th>
+              <th scope="col" style="width: 10%;" class="text-center">단위</th>
+              <th scope="col" style="width: 12%;" class="text-end">전산재고</th>
+              <th scope="col" style="width: 14%;" class="text-end">실재고</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryTbody">
+            <!-- Dynamic Content -->
+          </tbody>
+        </table>
+      </div>
     </div>
+  </div>
 
-    <!-- Modal for Adding New Item -->
-    <div class="modal fade" id="addProductModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title fw-bold">신규 상품 행 추가</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="productForm">
-                        <div class="mb-3">
-                            <label for="modalCode" class="form-label fw-bold">코드 (바코드) <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="modalCode" placeholder="예: 8801234567890" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="modalName" class="form-label fw-bold">상품명 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="modalName" placeholder="예: 스테인리스 볼트" required>
-                        </div>
-                        <div class="row">
-                            <div class="col-6 mb-3">
-                                <label for="modalSpec" class="form-label">규격</label>
-                                <input type="text" class="form-control" id="modalSpec" placeholder="예: M8 x 20mm">
-                            </div>
-                            <div class="col-6 mb-3">
-                                <label for="modalUnit" class="form-label">단위</label>
-                                <input type="text" class="form-control" id="modalUnit" placeholder="예: EA">
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-6 mb-3">
-                                <label for="modalSystemStock" class="form-label fw-bold">전산재고</label>
-                                <input type="number" class="form-control" id="modalSystemStock" min="0" value="0">
-                            </div>
-                            <div class="col-6 mb-3">
-                                <label for="modalActualStock" class="form-label fw-bold">실재고</label>
-                                <input type="number" class="form-control" id="modalActualStock" min="0" value="0">
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                    <button type="button" class="btn btn-primary" onclick="addProductRow()">추가하기</button>
-                </div>
-            </div>
+  <!-- Barcode Scanner Modal -->
+  <div class="modal fade" id="scannerModal" tabindex="-1" aria-labelledby="scannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-dark text-white">
+          <h5 class="modal-title fw-bold" id="scannerModalLabel">
+            <i class="bi bi-qr-code-scan text-danger me-2"></i>바코드/QR 스캐너
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-    </div>
-
-    <!-- Toast Notification -->
-    <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
-        <div id="liveToast" class="toast align-items-center text-white bg-dark border-0" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="d-flex">
-                <div class="toast-body" id="toastMessage">
-                    알림 메시지
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        <div class="modal-body text-center p-3">
+          <div class="scanner-overlay mb-3">
+            <div id="interactive-viewport"></div>
+          </div>
+          
+          <!-- Zoom & Focus Control Toolbar -->
+          <div id="zoomControls" class="scanner-controls mb-3 text-white d-none">
+            <div class="d-flex align-items-center justify-content-between gap-2">
+              <small class="fw-bold"><i class="bi bi-zoom-in me-1"></i>디지털 줌 조절:</small>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-light" onclick="setZoom(1)">1x</button>
+                <button type="button" class="btn btn-outline-light" onclick="setZoom(1.5)">1.5x</button>
+                <button type="button" class="btn btn-outline-light" onclick="setZoom(2)">2x</button>
+              </div>
             </div>
+            <input type="range" class="form-range mt-2" id="zoomRange" min="1" max="3" step="0.1" value="1" oninput="onZoomSliderChange(this.value)">
+          </div>
+
+          <!-- Scan Options -->
+          <div class="form-check form-switch d-inline-block text-start mb-2">
+            <input class="form-check-input" type="checkbox" id="autoIncrementCheck" checked style="cursor: pointer;">
+            <label class="form-check-label fw-bold text-dark" for="autoIncrementCheck" style="cursor: pointer;">
+              스캔 성공 시 실재고 +1 자동 증가
+            </label>
+          </div>
+
+          <div id="scanResultStatus" class="alert alert-secondary py-2 mb-0 fw-bold" role="alert">
+            카메라에 바코드를 비춰주세요. (약 20~30cm 거리 유지)
+          </div>
         </div>
+        <div class="modal-footer bg-light">
+          <button type="button" class="btn btn-secondary w-100" data-bs-dismiss="modal">스캐너 닫기</button>
+        </div>
+      </div>
     </div>
+  </div>
 
-    <!-- Bootstrap 5 Bundle JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Add Item Modal -->
+  <div class="modal fade" id="addItemModal" tabindex="-1" aria-labelledby="addItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="addItemModalLabel"><i class="bi bi-plus-circle me-2"></i>신규 상품 행 추가</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="addItemForm">
+            <div class="mb-3">
+              <label for="itemCode" class="form-label fw-bold">코드 (바코드) <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="itemCode" required placeholder="예: 8801234567890">
+            </div>
+            <div class="mb-3">
+              <label for="itemName" class="form-label fw-bold">상품명 <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="itemName" required placeholder="예: 스테인리스 볼트">
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label for="itemSpec" class="form-label fw-bold">규격</label>
+                <input type="text" class="form-control" id="itemSpec" placeholder="예: M8 x 20mm">
+              </div>
+              <div class="col-6">
+                <label for="itemUnit" class="form-label fw-bold">단위</label>
+                <input type="text" class="form-control" id="itemUnit" value="EA" placeholder="예: EA, BOX">
+              </div>
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <label for="itemSystemQty" class="form-label fw-bold">전산재고</label>
+                <input type="number" class="form-control" id="itemSystemQty" value="0" min="0">
+              </div>
+              <div class="col-6">
+                <label for="itemActualQty" class="form-label fw-bold">실재고</label>
+                <input type="number" class="form-control" id="itemActualQty" value="0" min="0">
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+          <button type="button" class="btn btn-primary" onclick="submitNewItem()">추가하기</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
-    <!-- Application Logic -->
-    <script>
-        // Sample Initial Data
-        const defaultProducts = [
-            { code: '8801000100012', name: '육각 볼트', spec: 'M8 x 20mm', unit: 'EA', systemStock: 100, actualStock: 100 },
-            { code: '8801000100029', name: '평와셔', spec: 'M8', unit: 'BOX', systemStock: 50, actualStock: 48 },
-            { code: 'P-101', name: '산업용 윤활유', spec: '500ml', unit: 'EA', systemStock: 25, actualStock: 25 },
-            { code: 'C-201', name: '작업용 장갑', spec: 'L (10켤레입)', unit: 'SET', systemStock: 15, actualStock: 12 },
-            { code: 'D-305', name: '포장용 테이프', spec: '48mm x 50m', unit: 'ROLL', systemStock: 80, actualStock: 80 }
-        ];
+  <!-- Toast Notification -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
+    <div id="liveToast" class="toast align-items-center text-bg-dark border-0" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body" id="toastMessage">
+          메시지 내용
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
 
-        let products = [];
-        let addModal, scannerModal, toast;
-        let html5QrCode = null;
-        let isProcessingScan = false;
+  <!-- Bootstrap 5 JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
-        document.addEventListener('DOMContentLoaded', () => {
-            addModal = new bootstrap.Modal(document.getElementById('addProductModal'));
-            scannerModal = new bootstrap.Modal(document.getElementById('scannerModal'));
-            toast = new bootstrap.Toast(document.getElementById('liveToast'));
+  <script>
+    // Initial Sample Data
+    const defaultData = [
+      { code: "8801000100012", name: "육각 볼트", spec: "M8 x 20mm", unit: "EA", systemQty: 100, actualQty: 100 },
+      { code: "8801000100029", name: "평와셔", spec: "M8", unit: "BOX", systemQty: 50, actualQty: 48 },
+      { code: "P-101", name: "산업용 윤활유", spec: "500ml", unit: "EA", systemQty: 25, actualQty: 25 },
+      { code: "C-201", name: "작업용 장갑", spec: "L (10켤레입)", unit: "SET", systemQty: 15, actualQty: 12 },
+      { code: "D-305", name: "포장용 테이프", spec: "48mm x 50m", unit: "ROLL", systemQty: 80, actualQty: 80 }
+    ];
 
-            // Safe lifecycle hook for Camera Stopping on Modal Dismissal
-            const scannerModalElement = document.getElementById('scannerModal');
-            scannerModalElement.addEventListener('hidden.bs.modal', async () => {
-                await stopCameraScannerSafely();
+    let inventory = [];
+    let html5QrCode = null;
+    let isProcessingScan = false;
+    let videoTrack = null;
+
+    document.addEventListener("DOMContentLoaded", () => {
+      loadFromLocalStorage();
+      renderTable();
+
+      // Camera Cleanup Event Listener
+      const scannerModalEl = document.getElementById('scannerModal');
+      scannerModalEl.addEventListener('hidden.bs.modal', async () => {
+        await stopCameraScannerSafely();
+      });
+    });
+
+    function loadFromLocalStorage() {
+      const savedData = localStorage.getItem("inventory_items_v3");
+      if (savedData) {
+        try {
+          inventory = JSON.parse(savedData);
+        } catch(e) {
+          inventory = [...defaultData];
+        }
+      } else {
+        inventory = [...defaultData];
+      }
+    }
+
+    function saveToLocalStorage() {
+      localStorage.setItem("inventory_items_v3", JSON.stringify(inventory));
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("inventoryTbody");
+      const searchKeyword = document.getElementById("searchInput").value.trim().toLowerCase();
+      tbody.innerHTML = "";
+
+      const filtered = inventory.filter(item => 
+        item.code.toLowerCase().includes(searchKeyword) ||
+        item.name.toLowerCase().includes(searchKeyword) ||
+        (item.spec && item.spec.toLowerCase().includes(searchKeyword))
+      );
+
+      document.getElementById("totalItemCount").innerText = filtered.length;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted">등록된 품목이 없거나 검색 결과가 없습니다.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach((item) => {
+        const tr = document.createElement("tr");
+        tr.id = `row-${item.code}`;
+
+        tr.innerHTML = `
+          <td><code>${escapeHtml(item.code)}</code></td>
+          <td class="fw-bold text-dark">${escapeHtml(item.name)}</td>
+          <td class="text-center text-secondary">${escapeHtml(item.spec || '-')}</td>
+          <td class="text-center"><span class="badge bg-light text-dark border">${escapeHtml(item.unit || 'EA')}</span></td>
+          <td class="text-end fw-semibold text-secondary fs-6">${Number(item.systemQty).toLocaleString()}</td>
+          <td class="text-end">
+            <input type="number" 
+                   id="input-${item.code}"
+                   class="form-control form-control-sm input-qty ms-auto" 
+                   value="${item.actualQty}" 
+                   min="0"
+                   onchange="updateActualQty('${item.code}', this.value)">
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateActualQty(code, value) {
+      const val = parseInt(value, 10);
+      const target = inventory.find(i => i.code === code);
+      if (target && !isNaN(val)) {
+        target.actualQty = val >= 0 ? val : 0;
+        saveToLocalStorage();
+      }
+    }
+
+    function copySystemToActual() {
+      if (confirm('모든 전산재고 수량을 실재고 수량으로 복사하시겠습니까?')) {
+        inventory.forEach(item => item.actualQty = item.systemQty);
+        saveToLocalStorage();
+        renderTable();
+        showToast('전산재고 수량이 실재고로 복사되었습니다.');
+      }
+    }
+
+    function saveAllItems() {
+      saveToLocalStorage();
+      showToast("모든 실재고 데이터가 완벽히 저장되었습니다.");
+    }
+
+    function openAddModal(prefilledCode = '') {
+      document.getElementById("addItemForm").reset();
+      if (prefilledCode) {
+        document.getElementById("itemCode").value = prefilledCode;
+      }
+      const modal = new bootstrap.Modal(document.getElementById('addItemModal'));
+      modal.show();
+    }
+
+    function submitNewItem() {
+      const code = document.getElementById("itemCode").value.trim();
+      const name = document.getElementById("itemName").value.trim();
+      const spec = document.getElementById("itemSpec").value.trim();
+      const unit = document.getElementById("itemUnit").value.trim();
+      const systemQty = parseInt(document.getElementById("itemSystemQty").value, 10) || 0;
+      const actualQty = parseInt(document.getElementById("itemActualQty").value, 10) || 0;
+
+      if (!code || !name) {
+        alert("코드와 상품명은 필수 입력값입니다.");
+        return;
+      }
+
+      const existingIndex = inventory.findIndex(i => i.code === code);
+      if (existingIndex >= 0) {
+        if (!confirm(`코드 [${code}]가 이미 존재합니다. 정보를 업데이트하시겠습니까?`)) {
+          return;
+        }
+        inventory[existingIndex] = { code, name, spec, unit, systemQty, actualQty };
+      } else {
+        inventory.unshift({ code, name, spec, unit, systemQty, actualQty });
+      }
+
+      saveToLocalStorage();
+      renderTable();
+
+      const modalEl = document.getElementById('addItemModal');
+      const modal = bootstrap.Modal.getInstance(modalEl);
+      if (modal) modal.hide();
+
+      showToast(`'${name}' 상품이 등록되었습니다.`);
+    }
+
+    // --- Camera & Barcode Scanning Logic ---
+
+    function openScannerModal() {
+      const modal = new bootstrap.Modal(document.getElementById('scannerModal'));
+      modal.show();
+      setTimeout(async () => {
+        await initCameraScanner();
+      }, 350);
+    }
+
+    async function initCameraScanner() {
+      const statusEl = document.getElementById("scanResultStatus");
+      const zoomControlsEl = document.getElementById("zoomControls");
+      statusEl.className = "alert alert-secondary py-2 mb-0 fw-bold";
+      statusEl.innerText = "카메라 초기화 중...";
+      zoomControlsEl.classList.add("d-none");
+
+      await stopCameraScannerSafely();
+
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("interactive-viewport");
+      }
+
+      const qrConfig = {
+        fps: 15,
+        qrbox: { width: 280, height: 160 },
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        }
+      };
+
+      const cameraConstraints = {
+        facingMode: "environment",
+        advanced: [{ focusMode: "continuous" }]
+      };
+
+      try {
+        await html5QrCode.start(
+          cameraConstraints,
+          qrConfig,
+          onScanSuccess,
+          onScanFailure
+        );
+
+        statusEl.className = "alert alert-info py-2 mb-0 fw-bold";
+        statusEl.innerText = "카메라에 바코드를 비춰주세요. (약 20~30cm 거리 유지)";
+
+        setTimeout(() => {
+          checkZoomCapabilities();
+        }, 800);
+
+      } catch (err) {
+        statusEl.className = "alert alert-danger py-2 mb-0 fw-bold";
+        statusEl.innerText = "카메라 접근 실패: 권한 허용 여부 또는 HTTPS 환경을 확인해주세요.";
+      }
+    }
+
+    async function stopCameraScannerSafely() {
+      if (html5QrCode) {
+        try {
+          if (html5QrCode.getState && html5QrCode.getState() === Html5QrcodeScannerState.SCANNING) {
+            await html5QrCode.stop();
+          }
+          await html5QrCode.clear();
+        } catch (err) {
+          // Handled silently
+        }
+      }
+      videoTrack = null;
+      isProcessingScan = false;
+    }
+
+    function checkZoomCapabilities() {
+      try {
+        const videoElement = document.querySelector("#interactive-viewport video");
+        if (videoElement && videoElement.srcObject) {
+          const stream = videoElement.srcObject;
+          videoTrack = stream.getVideoTracks()[0];
+          const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+
+          if (capabilities.zoom) {
+            const zoomRange = document.getElementById("zoomRange");
+            zoomRange.min = capabilities.zoom.min || 1;
+            zoomRange.max = Math.min(capabilities.zoom.max || 3, 3);
+            zoomRange.step = capabilities.zoom.step || 0.1;
+            zoomRange.value = 1;
+            document.getElementById("zoomControls").classList.remove("d-none");
+          }
+        }
+      } catch (e) {
+        // Zoom unsupported
+      }
+    }
+
+    function setZoom(zoomValue) {
+      document.getElementById("zoomRange").value = zoomValue;
+      onZoomSliderChange(zoomValue);
+    }
+
+    function onZoomSliderChange(zoomValue) {
+      if (videoTrack && typeof videoTrack.applyConstraints === 'function') {
+        videoTrack.applyConstraints({
+          advanced: [{ zoom: parseFloat(zoomValue) }]
+        }).catch(e => {});
+      }
+    }
+
+    function onScanSuccess(decodedText) {
+      if (isProcessingScan) return;
+      isProcessingScan = true;
+
+      const autoInc = document.getElementById("autoIncrementCheck").checked;
+      const statusEl = document.getElementById("scanResultStatus");
+      const code = decodedText.trim();
+
+      playBeep();
+
+      const item = inventory.find(i => i.code === code);
+
+      if (item) {
+        if (autoInc) {
+          item.actualQty += 1;
+          saveToLocalStorage();
+          renderTable();
+
+          statusEl.className = "alert alert-success py-2 mb-0 fw-bold";
+          statusEl.innerHTML = `<i class="bi bi-check-circle me-1"></i> [${item.name}] 실재고 +1 증가 ➔ ${item.actualQty}개`;
+        } else {
+          statusEl.className = "alert alert-info py-2 mb-0 fw-bold";
+          statusEl.innerHTML = `<i class="bi bi-info-circle me-1"></i> 감지된 상품: ${item.name} (${item.code})`;
+        }
+
+        setTimeout(() => {
+          const rowEl = document.getElementById(`row-${item.code}`);
+          if (rowEl) {
+            rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            rowEl.classList.remove("row-highlight");
+            void rowEl.offsetWidth;
+            rowEl.classList.add("row-highlight");
+          }
+        }, 200);
+
+      } else {
+        statusEl.className = "alert alert-warning py-2 mb-0 fw-bold";
+        statusEl.innerHTML = `미등록 코드: <code>${escapeHtml(code)}</code> 
+          <button class="btn btn-sm btn-dark ms-2" onclick="registerScannedCode('${escapeHtml(code)}')">이 코드로 신규 등록</button>`;
+      }
+
+      setTimeout(() => {
+        isProcessingScan = false;
+      }, 1500);
+    }
+
+    function onScanFailure(error) {
+      // Noise
+    }
+
+    function registerScannedCode(code) {
+      const modalEl = document.getElementById('scannerModal');
+      const scannerModal = bootstrap.Modal.getInstance(modalEl);
+      if (scannerModal) scannerModal.hide();
+
+      openAddModal(code);
+    }
+
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.value = 0.1;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } catch (e) {}
+    }
+
+    // CSV Import / Export
+    function exportCSV() {
+      if (inventory.length === 0) {
+        alert("내보낼 품목 데이터가 없습니다.");
+        return;
+      }
+
+      let csvContent = "\uFEFF코드,상품명,규격,단위,전산재고,실재고\n";
+      inventory.forEach(item => {
+        csvContent += `"${item.code}","${(item.name || '').replace(/"/g, '""')}","${(item.spec || '').replace(/"/g, '""')}","${(item.unit || 'EA').replace(/"/g, '""')}",${item.systemQty},${item.actualQty}\n`;
+      });
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `재고조사결과_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function importCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const lines = e.target.result.split(/\r\n|\n/).filter(line => line.trim() !== '');
+        if (lines.length < 2) {
+          alert('CSV 파일에 헤더와 데이터가 올바르게 포함되어야 합니다.');
+          return;
+        }
+
+        const imported = [];
+        for (let i = 1; i < lines.length; i++) {
+          const row = parseCSVRow(lines[i]);
+          if (row.length >= 5) {
+            imported.push({
+              code: row[0].trim(),
+              name: row[1].trim(),
+              spec: row[2].trim(),
+              unit: row[3].trim() || 'EA',
+              systemQty: parseInt(row[4], 10) || 0,
+              actualQty: parseInt(row[5], 10) !== undefined && row[5] !== '' ? parseInt(row[5], 10) : (parseInt(row[4], 10) || 0)
             });
+          }
+        }
 
-            loadDataFromStorage();
+        if (imported.length > 0) {
+          if (confirm(`총 ${imported.length}개 상품 데이터로 불러오시겠습니까?`)) {
+            inventory = imported;
+            saveToLocalStorage();
             renderTable();
-        });
-
-        function loadDataFromStorage() {
-            const saved = localStorage.getItem('clean_inventory_data_v2');
-            if (saved) {
-                try {
-                    products = JSON.parse(saved);
-                } catch(e) {
-                    products = [...defaultProducts];
-                }
-            } else {
-                products = [...defaultProducts];
-            }
+            showToast('CSV 파일 데이터를 가져왔습니다.');
+          }
+        } else {
+          alert('CSV 파일 형식을 확인해주세요. (순서: 코드, 상품명, 규격, 단위, 전산재고, 실재고)');
         }
+        event.target.value = '';
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
 
-        function saveDataToStorage() {
-            localStorage.setItem('clean_inventory_data_v2', JSON.stringify(products));
+    function parseCSVRow(rowText) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < rowText.length; i++) {
+        const char = rowText[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.replace(/^"|"$/g, ''));
+          current = '';
+        } else {
+          current += char;
         }
+      }
+      result.push(current.replace(/^"|"$/g, ''));
+      return result;
+    }
 
-        function showNotification(msg) {
-            document.getElementById('toastMessage').innerText = msg;
-            toast.show();
-        }
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
 
-        function playBeepSound() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(880, ctx.currentTime);
-                gain.gain.setValueAtTime(0.1, ctx.currentTime);
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start();
-                osc.stop(ctx.currentTime + 0.15);
-            } catch (e) {
-                // AudioContext not allowed or unsupported
-            }
-        }
-
-        function renderTable() {
-            const tbody = document.getElementById('inventoryTableBody');
-            tbody.innerHTML = '';
-
-            const searchValue = document.getElementById('searchInput').value.toLowerCase().trim();
-            const filtered = products.filter(p => p.name.toLowerCase().includes(searchValue) || p.code.toLowerCase().includes(searchValue));
-
-            if (filtered.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">조회된 상품이 없습니다.</td></tr>`;
-                return;
-            }
-
-            filtered.forEach(p => {
-                const tr = document.createElement('tr');
-                tr.id = `row-${p.code}`;
-                tr.innerHTML = `
-                    <td><code>${escapeHtml(p.code)}</code></td>
-                    <td class="fw-bold text-dark">${escapeHtml(p.name)}</td>
-                    <td class="text-center text-secondary">${escapeHtml(p.spec || '-')}</td>
-                    <td class="text-center"><span class="badge bg-light text-dark border">${escapeHtml(p.unit || 'EA')}</span></td>
-                    <td class="text-center fs-6">${Number(p.systemStock).toLocaleString()}</td>
-                    <td class="text-center">
-                        <input type="number" 
-                               id="input-${p.code}"
-                               class="form-control form-control-sm mx-auto actual-input" 
-                               value="${p.actualStock}" 
-                               min="0"
-                               onchange="updateActualStockDirect('${p.code}', this.value)">
-                    </td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        function updateActualStockDirect(code, val) {
-            const num = parseInt(val);
-            if (isNaN(num) || num < 0) return;
-
-            const target = products.find(p => p.code === code);
-            if (target) {
-                target.actualStock = num;
-            }
-        }
-
-        function copySystemToActual() {
-            if (confirm('모든 상품의 전산재고 수량을 실재고 수량으로 복사하시겠습니까?')) {
-                products.forEach(p => p.actualStock = p.systemStock);
-                saveDataToStorage();
-                renderTable();
-                showNotification('전산재고 수량이 실재고로 복사되었습니다.');
-            }
-        }
-
-        function saveAllData() {
-            saveDataToStorage();
-            showNotification('모든 실재고 데이터가 성공적으로 저장되었습니다.');
-        }
-
-        function openAddModal(prefilledCode = '') {
-            document.getElementById('productForm').reset();
-            if (prefilledCode) {
-                document.getElementById('modalCode').value = prefilledCode;
-            }
-            addModal.show();
-        }
-
-        function addProductRow() {
-            const code = document.getElementById('modalCode').value.trim();
-            const name = document.getElementById('modalName').value.trim();
-            const spec = document.getElementById('modalSpec').value.trim();
-            const unit = document.getElementById('modalUnit').value.trim();
-            const systemStock = parseInt(document.getElementById('modalSystemStock').value) || 0;
-            const actualStock = parseInt(document.getElementById('modalActualStock').value) || 0;
-
-            if (!code || !name) {
-                alert('코드와 상품명은 필수 입력 사항입니다.');
-                return;
-            }
-
-            if (products.some(p => p.code === code)) {
-                alert('이미 존재하는 코드입니다.');
-                return;
-            }
-
-            products.push({
-                code,
-                name,
-                spec,
-                unit: unit || 'EA',
-                systemStock: Math.max(0, systemStock),
-                actualStock: Math.max(0, actualStock)
-            });
-
-            saveDataToStorage();
-            renderTable();
-            addModal.hide();
-            showNotification(`'${name}' 상품이 새로 추가되었습니다.`);
-        }
-
-        // --- CAMERA BARCODE SCANNER LOGIC WITH ROBUST LIFECYCLE MANAGEMENT ---
-
-        async function openScannerModal() {
-            const badge = document.getElementById('scanResultBadge');
-            badge.className = 'alert alert-secondary mt-3 mb-0 scan-status-badge fw-bold text-break';
-            badge.innerText = '카메라 준비 중...';
-
-            scannerModal.show();
-
-            // Wait for Bootstrap modal transition to settle completely before starting camera
-            setTimeout(async () => {
-                await startCameraScanner();
-            }, 350);
-        }
-
-        async function startCameraScanner() {
-            await stopCameraScannerSafely(); // Ensure clean state before starting
-
-            if (!html5QrCode) {
-                html5QrCode = new Html5Qrcode("reader");
-            }
-
-            const config = {
-                fps: 10,
-                qrbox: { width: 250, height: 180 },
-                aspectRatio: 1.0
-            };
-
-            try {
-                await html5QrCode.start(
-                    { facingMode: "environment" },
-                    config,
-                    onScanSuccess,
-                    onScanError
-                );
-                const badge = document.getElementById('scanResultBadge');
-                badge.className = 'alert alert-info mt-3 mb-0 scan-status-badge fw-bold text-break';
-                badge.innerText = '카메라에 바코드를 비춰주세요.';
-            } catch (err) {
-                const badge = document.getElementById('scanResultBadge');
-                badge.className = 'alert alert-danger mt-3 mb-0 scan-status-badge fw-bold text-break';
-                badge.innerText = '카메라 접근 실패: 권한 허용 여부 또는 HTTPS 환경을 확인해주세요.';
-            }
-        }
-
-        async function stopCameraScannerSafely() {
-            if (html5QrCode) {
-                try {
-                    // Check if current camera instance is actively scanning
-                    if (html5QrCode.getState && html5QrCode.getState() === Html5QrcodeScannerState.SCANNING) {
-                        await html5QrCode.stop();
-                    }
-                    await html5QrCode.clear();
-                } catch (e) {
-                    // Fail silently on teardown race conditions
-                }
-            }
-            isProcessingScan = false;
-        }
-
-        function onScanSuccess(decodedText) {
-            if (isProcessingScan) return;
-            isProcessingScan = true; // Cooldown lock
-
-            playBeepSound();
-            const code = decodedText.trim();
-            const autoIncrement = document.getElementById('autoIncrementSwitch').checked;
-            const badge = document.getElementById('scanResultBadge');
-
-            const item = products.find(p => p.code === code);
-
-            if (item) {
-                if (autoIncrement) {
-                    item.actualStock += 1;
-                    badge.className = 'alert alert-success mt-3 mb-0 scan-status-badge fw-bold text-break';
-                    badge.innerText = `[스캔 성공] ${item.name} ➔ 실재고: ${item.actualStock}`;
-                } else {
-                    badge.className = 'alert alert-info mt-3 mb-0 scan-status-badge fw-bold text-break';
-                    badge.innerText = `[상품 감지] ${item.name} (${item.code})`;
-                }
-
-                saveDataToStorage();
-                renderTable();
-                highlightAndFocusRow(item.code);
-            } else {
-                badge.className = 'alert alert-warning mt-3 mb-0 scan-status-badge fw-bold text-break';
-                badge.innerHTML = `<div>미등록 코드: <code>${escapeHtml(code)}</code><br>` +
-                    `<button class="btn btn-sm btn-outline-dark mt-1" onclick="quickAddFromScan('${escapeHtml(code)}')">이 코드로 신규 등록</button></div>`;
-            }
-
-            // Cooldown timer (1.5 seconds) to allow continuous scanning without camera restarts
-            setTimeout(() => {
-                isProcessingScan = false;
-            }, 1500);
-        }
-
-        function onScanError(errorMessage) {
-            // Ignore frame scan noise
-        }
-
-        function highlightAndFocusRow(code) {
-            const row = document.getElementById(`row-${code}`);
-            const input = document.getElementById(`input-${code}`);
-
-            if (row) {
-                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                row.classList.remove('scanned-highlight');
-                void row.offsetWidth; // Trigger CSS reflow
-                row.classList.add('scanned-highlight');
-            }
-
-            if (input && !document.getElementById('autoIncrementSwitch').checked) {
-                input.focus();
-                input.select();
-            }
-        }
-
-        async function quickAddFromScan(code) {
-            scannerModal.hide();
-            openAddModal(code);
-        }
-
-        // CSV IMPORT & EXPORT
-        function exportCSV() {
-            if (products.length === 0) {
-                alert('내보낼 데이터가 없습니다.');
-                return;
-            }
-
-            const headers = ['코드', '상품명', '규격', '단위', '전산재고', '실재고'];
-            const rows = products.map(p => [
-                `"${p.code}"`,
-                `"${p.name.replace(/"/g, '""')}"`,
-                `"${(p.spec || '').replace(/"/g, '""')}"`,
-                `"${(p.unit || 'EA').replace(/"/g, '""')}"`,
-                p.systemStock,
-                p.actualStock
-            ]);
-
-            const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `inventory_${new Date().toISOString().slice(0,10)}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
-
-        function handleFileImport(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const lines = e.target.result.split(/\r\n|\n/).filter(line => line.trim() !== '');
-                if (lines.length < 2) {
-                    alert('CSV 파일에 헤더와 데이터가 포함되어야 합니다.');
-                    return;
-                }
-
-                const imported = [];
-                for (let i = 1; i < lines.length; i++) {
-                    const row = parseCSVRow(lines[i]);
-                    if (row.length >= 5) {
-                        imported.push({
-                            code: row[0].trim(),
-                            name: row[1].trim(),
-                            spec: row[2].trim(),
-                            unit: row[3].trim() || 'EA',
-                            systemStock: parseInt(row[4]) || 0,
-                            actualStock: parseInt(row[5]) !== undefined && row[5] !== '' ? parseInt(row[5]) : (parseInt(row[4]) || 0)
-                        });
-                    }
-                }
-
-                if (imported.length > 0) {
-                    if (confirm(`총 ${imported.length}개 상품 데이터로 새로 적용하시겠습니까?`)) {
-                        products = imported;
-                        saveDataToStorage();
-                        renderTable();
-                        showNotification('CSV 파일 데이터가 성공적으로 가져와졌습니다.');
-                    }
-                } else {
-                    alert('CSV 파일 형식을 확인해주세요. (순서: 코드, 상품명, 규격, 단위, 전산재고, 실재고)');
-                }
-                event.target.value = '';
-            };
-            reader.readAsText(file, 'UTF-8');
-        }
-
-        function parseCSVRow(rowText) {
-            const result = [];
-            let current = '';
-            let inQuotes = false;
-
-            for (let i = 0; i < rowText.length; i++) {
-                const char = rowText[i];
-                if (char === '"') {
-                    inQuotes = !inQuotes;
-                } else if (char === ',' && !inQuotes) {
-                    result.push(current.replace(/^"|"$/g, ''));
-                    current = '';
-                } else {
-                    current += char;
-                }
-            }
-            result.push(current.replace(/^"|"$/g, ''));
-            return result;
-        }
-
-        function escapeHtml(str) {
-            return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-        }
-    </script>
+    function showToast(msg) {
+      document.getElementById("toastMessage").innerText = msg;
+      const toastEl = document.getElementById('liveToast');
+      const toast = new bootstrap.Toast(toastEl);
+      toast.show();
+    }
+  </script>
 </body>
 </html>
