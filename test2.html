@@ -81,13 +81,17 @@
       </div>
       <div class="modal-body">
         <div id="reader"></div>
-        <div class="d-flex align-items-center gap-2 mt-2">
-          <button class="btn btn-sm btn-outline-primary text-nowrap" id="btnFocus"><i class="bi bi-bullseye"></i> 초점 다시 맞추기</button>
-          <div id="zoomBox" class="d-none flex-grow-1 d-flex align-items-center gap-2">
-            <i class="bi bi-zoom-in"></i><input type="range" class="form-range" id="zoom">
+        <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+          <button class="btn btn-sm btn-outline-primary text-nowrap" id="btnFocus"><i class="bi bi-bullseye"></i> 초점</button>
+          <button class="btn btn-sm btn-outline-warning text-nowrap d-none" id="btnTorch"><i class="bi bi-lightbulb"></i> 조명</button>
+          <div id="zoomBox" class="d-none flex-grow-1" style="min-width:150px">
+            <div class="d-flex align-items-center gap-2"><i class="bi bi-zoom-in"></i><input type="range" class="form-range" id="zoom"></div>
           </div>
         </div>
-        <div class="form-text">초점이 흐리면 폰을 바코드에서 15~20cm 떨어뜨리고, 줌을 올려 보세요. 화면을 탭해도 다시 초점을 맞춥니다.</div>
+        <div id="camBox" class="d-none mt-2">
+          <select id="camSel" class="form-select form-select-sm" aria-label="카메라 선택"></select>
+        </div>
+        <div class="form-text">작은 바코드는 줌을 올리고 폰을 15~25cm 떨어뜨려 비추세요. 초점이 안 맞으면 위 목록에서 다른 후면 카메라를 선택해 보세요(초광각 카메라는 초점이 약합니다).</div>
         <div class="d-flex flex-wrap gap-3 mt-3">
           <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" id="optSound" checked>
@@ -251,66 +255,101 @@ let scanner = null, lastCode = '', lastTime = 0, scanLocked = false, pending = n
 const modal = new bootstrap.Modal($('scanModal'));
 
 $('btnScan').onclick = () => { initAudio(); modal.show(); };
+const CAM_KEY = 'stocktake_cam_v1';
+const lsGet = k => { try { return localStorage.getItem(k); } catch(e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} };
+const hasBD = 'BarcodeDetector' in window;       // 네이티브 인식 가능 여부(안드로이드 크롬 등)
+let camTrack = null, camState = {}, torchOn = false;
+
+async function startScan(deviceId){
+  if (scanner) { try { await scanner.stop(); } catch(e) {} try { scanner.clear(); } catch(e) {} }
+  scanner = new Html5Qrcode('reader', { verbose: false,
+    formatsToSupport: [ Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39, Html5QrcodeSupportedFormats.QR_CODE ],
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+  // qrbox를 주지 않음 = 화면 전체를 분석 (작은 바코드도 놓치지 않도록). 해상도는 가능한 높게 요청.
+  const vc = { width: { ideal: hasBD ? 3840 : 1920 }, height: { ideal: hasBD ? 2160 : 1080 }, advanced: [{ focusMode: 'continuous' }] };
+  if (deviceId) vc.deviceId = { exact: deviceId }; else vc.facingMode = 'environment';
+  await scanner.start(deviceId || { facingMode: 'environment' }, { fps: 12, videoConstraints: vc }, onScan, () => {});
+  await tuneCamera();
+}
+async function switchCam(id, save = true){
+  if (save) lsSet(CAM_KEY, id);
+  await startScan(id);
+  const cur = camTrack && camTrack.getSettings().deviceId;
+  if (cur) $('camSel').value = cur;
+}
+async function fillCameraList(){
+  let cams = []; try { cams = await Html5Qrcode.getCameras(); } catch(e) {}
+  const cur = camTrack && camTrack.getSettings().deviceId;
+  $('camSel').innerHTML = cams.map((c, i) =>
+    `<option value="${esc(c.id)}" ${c.id === cur ? 'selected' : ''}>${esc(c.label || ('카메라 ' + (i + 1)))}</option>`).join('');
+  $('camBox').classList.toggle('d-none', cams.length < 2);
+  // 저장된 선택이 없는데 초광각 카메라가 잡혔다면 일반 후면 카메라로 자동 전환
+  if (!lsGet(CAM_KEY) && cams.length > 1) {
+    const bad = /ultra|초광각/i, skip = /망원|tele|macro|매크로|front|전면/i, back = /back|rear|후면|environment/i;
+    const curLabel = (cams.find(c => c.id === cur) || {}).label || '';
+    if (bad.test(curLabel)) {
+      const alt = cams.find(c => back.test(c.label) && !bad.test(c.label) && !skip.test(c.label));
+      if (alt) await switchCam(alt.id, false);
+    }
+  }
+}
+$('camSel').onchange = e => switchCam(e.target.value, true).catch(() => toast('카메라를 전환할 수 없습니다.'));
+
 $('scanModal').addEventListener('shown.bs.modal', async () => {
-  scanner = new Html5Qrcode('reader', { formatsToSupport: [
-    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,  Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.QR_CODE ],
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true } });   // 지원 기기는 네이티브 인식(빠르고 정확)
-  try {
-    await scanner.start({ facingMode: 'environment' },
-      { fps: 15,
-        qrbox: (w,h) => ({ width: Math.floor(w*0.9), height: Math.floor(Math.min(h*0.6, 220)) }),
-        videoConstraints: {
-          facingMode: 'environment',
-          width:  { ideal: 1920 }, height: { ideal: 1080 },   // 해상도를 높여야 가는 바코드도 읽힘
-          advanced: [{ focusMode: 'continuous' }]             // 연속 자동초점 (지원 기기)
-        } },
-      onScan, () => {});
-    tuneCamera();
-  } catch (err) {
-    $('scanMsg').innerHTML = '<span class="text-danger">카메라를 시작할 수 없습니다. HTTPS 접속인지, 카메라 권한이 허용되어 있는지 확인하세요.</span>';
+  try { await startScan(lsGet(CAM_KEY) || null); await fillCameraList(); }
+  catch (err) {
+    try { localStorage.removeItem(CAM_KEY); await startScan(null); await fillCameraList(); }   // 저장된 카메라가 없어졌으면 기본 카메라로
+    catch (e2) { $('scanMsg').innerHTML = '<span class="text-danger">카메라를 시작할 수 없습니다. HTTPS 접속인지, 카메라 권한이 허용되어 있는지 확인하세요.</span>'; }
   }
 });
 $('scanModal').addEventListener('hidden.bs.modal', async () => {
   if (scanner) { try { await scanner.stop(); scanner.clear(); } catch(e) {} scanner = null; }
-  camTrack = null; $('zoomBox').classList.add('d-none'); scanLocked = false; pending = null; lastCode = ''; $('foundPanel').classList.add('d-none');
+  camTrack = null; camState = {}; torchOn = false;
+  ['zoomBox','btnTorch','camBox','foundPanel'].forEach(id => $(id).classList.add('d-none'));
+  scanLocked = false; pending = null; lastCode = '';
 });
 
-/* ----- 카메라 초점/줌 ----- */
-let camTrack = null;
+/* ----- 카메라 초점/줌/조명 (제약 조건은 한 번에 합쳐서 적용) ----- */
+async function applyCam(patch){
+  Object.assign(camState, patch);
+  if (!camTrack) return;
+  try { await camTrack.applyConstraints({ advanced: [{ ...camState }] }); } catch(e) {}
+}
 async function tuneCamera(){
   const v = document.querySelector('#reader video');
   camTrack = v && v.srcObject && v.srcObject.getVideoTracks()[0];
+  camState = {}; torchOn = false;
+  $('zoomBox').classList.add('d-none'); $('btnTorch').classList.add('d-none'); $('btnTorch').classList.remove('active');
   if (!camTrack || !camTrack.getCapabilities) return;
   const cap = camTrack.getCapabilities();
-  try {
-    if (cap.focusMode && cap.focusMode.includes('continuous'))
-      await camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-  } catch(e) {}
-  if (cap.zoom) {                                   // 줌 지원 기기만 슬라이더 표시
+  if (cap.focusMode && cap.focusMode.includes('continuous')) camState.focusMode = 'continuous';
+  if (cap.zoom) {                                  // 작은 바코드: 기본 2배 줌으로 시작 (멀리서도 초점이 잡힘)
     const z = $('zoom'); z.min = cap.zoom.min; z.max = cap.zoom.max; z.step = cap.zoom.step || 0.1;
-    z.value = (camTrack.getSettings().zoom) || cap.zoom.min;
+    camState.zoom = Math.min(Math.max(2, cap.zoom.min), cap.zoom.max);
+    z.value = camState.zoom;
     $('zoomBox').classList.remove('d-none');
   }
+  if (cap.torch) $('btnTorch').classList.remove('d-none');
+  await applyCam({});
 }
 async function refocus(){
   if (!camTrack) return;
-  const cap = camTrack.getCapabilities ? camTrack.getCapabilities() : {};
-  try {
-    if (cap.focusMode && cap.focusMode.includes('single-shot')) {
-      await camTrack.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
-      setTimeout(() => camTrack && camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {}), 700);
-    } else if (cap.focusMode && cap.focusMode.includes('continuous')) {
-      await camTrack.applyConstraints({ advanced: [{ focusMode: 'manual' }] }).catch(() => {});
-      await camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-    } else toast('이 기기는 초점 조절을 지원하지 않습니다. 바코드와 거리를 조절해 보세요.');
-  } catch(e) {}
+  const fm = (camTrack.getCapabilities ? camTrack.getCapabilities() : {}).focusMode || [];
+  if (fm.includes('single-shot')) {
+    await applyCam({ focusMode: 'single-shot' });
+    setTimeout(() => applyCam({ focusMode: fm.includes('continuous') ? 'continuous' : 'single-shot' }), 800);
+  } else if (fm.includes('continuous')) {
+    if (fm.includes('manual')) await applyCam({ focusMode: 'manual' });
+    await applyCam({ focusMode: 'continuous' });
+  } else toast('이 기기는 초점 조절을 지원하지 않습니다. 줌과 거리를 조절해 보세요.');
 }
 $('btnFocus').onclick = refocus;
 $('reader').addEventListener('click', refocus);
-$('zoom').addEventListener('input', e => { if (camTrack) camTrack.applyConstraints({ advanced: [{ zoom: +e.target.value }] }).catch(() => {}); });
+$('zoom').addEventListener('input', e => applyCam({ zoom: +e.target.value }));
+$('btnTorch').onclick = () => { torchOn = !torchOn; $('btnTorch').classList.toggle('active', torchOn); applyCam({ torch: torchOn }); };
 
 /* ----- 효과음 (WebAudio, 파일 불필요) ----- */
 let actx = null;
